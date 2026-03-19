@@ -1,0 +1,21 @@
+{
+  "name": "roblox-discord-stats-bot",
+  "version": "1.0.0",
+  "description": "Bot Discord affichant les stats Roblox en temps réel",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
