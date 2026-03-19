@@ -1,6 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require('discord.js');
 const axios = require('axios');
-require('dotenv').config();
+if (process.env.NODE_ENV !== 'production') { try { require('dotenv').config(); } catch(e) {} }
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
