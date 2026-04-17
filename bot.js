@@ -86,46 +86,62 @@ async function registerCommands() {
 }
 
 // ─── Roblox API ───────────────────────────────────────────────────
+// On essaie d'abord l'API directe, puis un proxy communautaire si bloqué
 const ROBLOX_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Accept': 'application/json, text/plain, */*',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Origin': 'https://www.roblox.com',
+  'Accept': 'application/json',
   'Referer': 'https://www.roblox.com/',
 };
 
-async function fetchGameData(universeId) {
-  // Essaie plusieurs endpoints dans l'ordre
-  const endpoints = [
-    `https://games.roblox.com/v1/games?universeIds=${universeId}`,
-    `https://games.roblox.com/v2/games?universeIds=${universeId}`,
-  ];
+async function tryFetch(url, options = {}) {
+  const res = await axios.get(url, { headers: ROBLOX_HEADERS, timeout: 10000, ...options });
+  return res.data;
+}
 
-  for (const url of endpoints) {
-    try {
-      const res = await axios.get(url, {
-        headers: ROBLOX_HEADERS,
-        timeout: 10000,
-      });
-      const game = res.data?.data?.[0];
-      if (game) return game;
-    } catch (err) {
-      console.warn(`[API] Échec ${url} : ${err.response?.status || err.message}`);
-    }
+async function fetchGameData(universeId) {
+  // 1er essai : API directe Roblox
+  try {
+    const data = await tryFetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
+    const game = data?.data?.[0];
+    if (game) { console.log(`[API] Direct OK`); return game; }
+  } catch (err) {
+    console.warn(`[API] Direct bloqué (${err.response?.status || err.message}), essai proxy...`);
   }
+
+  // 2e essai : proxy RoPro (proxy public communautaire Roblox)
+  try {
+    const data = await tryFetch(`https://games.roproxy.com/v1/games?universeIds=${universeId}`);
+    const game = data?.data?.[0];
+    if (game) { console.log(`[API] Proxy RoPro OK`); return game; }
+  } catch (err) {
+    console.warn(`[API] Proxy RoPro échoué (${err.response?.status || err.message})`);
+  }
+
+  // 3e essai : proxy Polytoria
+  try {
+    const data = await tryFetch(`https://games.rbxproxy.com/v1/games?universeIds=${universeId}`);
+    const game = data?.data?.[0];
+    if (game) { console.log(`[API] Proxy rbxproxy OK`); return game; }
+  } catch (err) {
+    console.warn(`[API] Proxy rbxproxy échoué (${err.response?.status || err.message})`);
+  }
+
   return null;
 }
 
 async function fetchVotes(universeId) {
-  try {
-    const res = await axios.get(
-      `https://games.roblox.com/v1/games/votes?universeIds=${universeId}`,
-      { headers: ROBLOX_HEADERS, timeout: 8000 }
-    );
-    return res.data?.data?.[0] || null;
-  } catch {
-    return null;
+  const urls = [
+    `https://games.roblox.com/v1/games/votes?universeIds=${universeId}`,
+    `https://games.roproxy.com/v1/games/votes?universeIds=${universeId}`,
+  ];
+  for (const url of urls) {
+    try {
+      const data = await tryFetch(url);
+      const votes = data?.data?.[0];
+      if (votes) return votes;
+    } catch {}
   }
+  return null;
 }
 
 async function getRobloxGameStats(universeId) {
@@ -136,7 +152,7 @@ async function getRobloxGameStats(universeId) {
     ]);
 
     if (!game) {
-      console.error(`Erreur API Roblox (${universeId}): aucun jeu trouvé`);
+      console.error(`Erreur API Roblox (${universeId}): aucun jeu trouvé (tous les proxies ont échoué)`);
       return null;
     }
 
