@@ -7,6 +7,7 @@ const {
   Routes,
   SlashCommandBuilder,
   PermissionFlagsBits,
+  MessageFlags,
 } = require('discord.js');
 const axios = require('axios');
 const fs    = require('fs');
@@ -16,7 +17,7 @@ if (process.env.NODE_ENV !== 'production') { try { require('dotenv').config(); }
 
 // ─── Config ────────────────────────────────────────────────────────
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const CLIENT_ID     = process.env.CLIENT_ID; // ID de l'application Discord
+const CLIENT_ID     = process.env.CLIENT_ID;
 
 // ─── Fichier de stockage des configs par serveur ───────────────────
 const CONFIG_FILE = path.join(__dirname, 'configs.json');
@@ -35,7 +36,7 @@ function saveConfigs(configs) {
 let configs = loadConfigs();
 
 // ─── Timers actifs par serveur ─────────────────────────────────────
-const timers = {}; // { [guildId]: intervalId }
+const timers = {};
 
 // ─── Commandes slash ───────────────────────────────────────────────
 const commands = [
@@ -85,21 +86,27 @@ async function registerCommands() {
 }
 
 // ─── Roblox API ───────────────────────────────────────────────────
+// FIX : utilise apis.roblox.com (non bloqué) + headers pour contourner Cloudflare
 async function getRobloxGameStats(universeId) {
   try {
-    const [gamesRes, votesRes, activePlayersRes] = await Promise.all([
-      axios.get(`https://games.roblox.com/v1/games?universeIds=${universeId}`),
-      axios.get(`https://games.roblox.com/v1/games/votes?universeIds=${universeId}`),
-      axios.get(`https://games.roblox.com/v1/games/${universeId}/servers/Public?sortOrder=Asc&limit=100`)
-        .catch(() => ({ data: { data: [] } }))
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Referer': 'https://www.roblox.com/',
+      'Accept': 'application/json',
+    };
+
+    const [gamesRes, votesRes] = await Promise.all([
+      // Endpoint officiel non protégé par Cloudflare
+      axios.get(`https://apis.roblox.com/universes/v1/universes/${universeId}`, { headers }),
+      // Votes avec headers pour réduire les blocages
+      axios.get(`https://games.roblox.com/v1/games/votes?universeIds=${universeId}`, { headers })
+        .catch(() => ({ data: { data: [] } })),
     ]);
 
-    const game  = gamesRes.data.data[0];
-    const votes = votesRes.data.data[0];
-    const servers = activePlayersRes.data.data || [];
-    const playersOnline = servers.reduce((sum, s) => sum + (s.playing || 0), 0);
+    const game  = gamesRes.data;
+    const votes = votesRes.data.data?.[0];
 
-    if (!game) return null;
+    if (!game || !game.name) return null;
 
     return {
       name:           game.name,
@@ -107,7 +114,7 @@ async function getRobloxGameStats(universeId) {
       visits:         game.visits,
       favoritedCount: game.favoritedCount,
       playing:        game.playing,
-      playersOnline,
+      playersOnline:  game.playing,
       upVotes:        votes?.upVotes   || 0,
       downVotes:      votes?.downVotes || 0,
       maxPlayers:     game.maxPlayers,
@@ -116,7 +123,7 @@ async function getRobloxGameStats(universeId) {
       thumbnailUrl:   null,
     };
   } catch (err) {
-    console.error(`Erreur API Roblox (${universeId}):`, err.message);
+    console.error(`Erreur API Roblox (${universeId}):`, err.response?.status, err.message);
     return null;
   }
 }
@@ -173,12 +180,10 @@ async function updateStatsForGuild(guildId) {
 
     const embed = buildEmbed(stats);
 
-    // Mettre à jour le statut du bot (basé sur le dernier serveur mis à jour)
     client.user.setActivity(`${formatNumber(stats.playing)} joueurs en ligne`, {
       type: ActivityType.Watching
     });
 
-    // Éditer le message existant ou en créer un nouveau
     if (cfg.messageId) {
       try {
         const msg = await channel.messages.fetch(cfg.messageId);
@@ -190,7 +195,6 @@ async function updateStatsForGuild(guildId) {
       }
     }
 
-    // Chercher un message existant du bot
     const messages = await channel.messages.fetch({ limit: 10 });
     const existing = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
 
@@ -212,11 +216,11 @@ async function updateStatsForGuild(guildId) {
 
 // ─── Démarrer/arrêter le timer d'un serveur ───────────────────────
 function startGuild(guildId) {
-  stopGuild(guildId); // Nettoyer l'ancien timer si existant
+  stopGuild(guildId);
   const cfg = configs[guildId];
   if (!cfg) return;
 
-  updateStatsForGuild(guildId); // Première mise à jour immédiate
+  updateStatsForGuild(guildId);
   timers[guildId] = setInterval(() => updateStatsForGuild(guildId), cfg.interval * 60 * 1000);
   console.log(`▶️  [${guildId}] Timer démarré (${cfg.interval} min)`);
 }
@@ -232,13 +236,13 @@ function stopGuild(guildId) {
 // ─── Client Discord ────────────────────────────────────────────────
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-client.once('ready', async () => {
+// FIX : 'ready' renommé en 'clientReady' pour Discord.js v15
+client.once('clientReady', async () => {
   console.log(`\n✅  Bot connecté : ${client.user.tag}`);
   console.log(`🌍  Présent sur ${client.guilds.cache.size} serveur(s)\n`);
 
   await registerCommands();
 
-  // Relancer les timers pour les serveurs déjà configurés
   for (const guildId of Object.keys(configs)) {
     console.log(`🔄  Reprise du timer pour le serveur ${guildId}`);
     startGuild(guildId);
@@ -253,13 +257,13 @@ client.on('interactionCreate', async interaction => {
 
   // ── /setup ──────────────────────────────────────────────────────
   if (commandName === 'setup') {
-    await interaction.deferReply({ ephemeral: true });
+    // FIX : ephemeral remplacé par MessageFlags.Ephemeral
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const universeId = interaction.options.getString('universe_id');
     const channel    = interaction.options.getChannel('salon');
     const interval   = interaction.options.getInteger('intervalle') || 5;
 
-    // Vérifier que l'Universe ID est valide
     const stats = await getRobloxGameStats(universeId);
     if (!stats) {
       return interaction.editReply({
@@ -267,7 +271,6 @@ client.on('interactionCreate', async interaction => {
       });
     }
 
-    // Sauvegarder la config
     configs[guildId] = {
       universeId,
       channelId: channel.id,
@@ -276,7 +279,6 @@ client.on('interactionCreate', async interaction => {
     };
     saveConfigs(configs);
 
-    // Démarrer le timer
     startGuild(guildId);
 
     const embed = new EmbedBuilder()
@@ -299,7 +301,7 @@ client.on('interactionCreate', async interaction => {
     if (!cfg) {
       return interaction.reply({
         content: '❌ Le bot n\'est pas encore configuré sur ce serveur. Utilise `/setup` d\'abord.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -318,7 +320,7 @@ client.on('interactionCreate', async interaction => {
     if (!configs[guildId]) {
       return interaction.reply({
         content: '❌ Le bot n\'est pas configuré sur ce serveur.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -328,7 +330,7 @@ client.on('interactionCreate', async interaction => {
 
     return interaction.reply({
       content: '⏹️  Les mises à jour automatiques ont été arrêtées et la configuration supprimée.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -338,7 +340,7 @@ client.on('interactionCreate', async interaction => {
     if (!cfg) {
       return interaction.reply({
         content: '❌ Aucune configuration trouvée. Utilise `/setup` pour démarrer.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -352,7 +354,7 @@ client.on('interactionCreate', async interaction => {
         { name: '▶️  Timer actif',  value: timers[guildId] ? '✅ Oui' : '❌ Non',  inline: true },
       );
 
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 });
 
