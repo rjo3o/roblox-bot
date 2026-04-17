@@ -86,27 +86,59 @@ async function registerCommands() {
 }
 
 // ─── Roblox API ───────────────────────────────────────────────────
-// FIX : utilise apis.roblox.com (non bloqué) + headers pour contourner Cloudflare
+const ROBLOX_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Origin': 'https://www.roblox.com',
+  'Referer': 'https://www.roblox.com/',
+};
+
+async function fetchGameData(universeId) {
+  // Essaie plusieurs endpoints dans l'ordre
+  const endpoints = [
+    `https://games.roblox.com/v1/games?universeIds=${universeId}`,
+    `https://games.roblox.com/v2/games?universeIds=${universeId}`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await axios.get(url, {
+        headers: ROBLOX_HEADERS,
+        timeout: 10000,
+      });
+      const game = res.data?.data?.[0];
+      if (game) return game;
+    } catch (err) {
+      console.warn(`[API] Échec ${url} : ${err.response?.status || err.message}`);
+    }
+  }
+  return null;
+}
+
+async function fetchVotes(universeId) {
+  try {
+    const res = await axios.get(
+      `https://games.roblox.com/v1/games/votes?universeIds=${universeId}`,
+      { headers: ROBLOX_HEADERS, timeout: 8000 }
+    );
+    return res.data?.data?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 async function getRobloxGameStats(universeId) {
   try {
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': 'https://www.roblox.com/',
-      'Accept': 'application/json',
-    };
-
-    const [gamesRes, votesRes] = await Promise.all([
-      // Endpoint officiel non protégé par Cloudflare
-      axios.get(`https://apis.roblox.com/universes/v1/universes/${universeId}`, { headers }),
-      // Votes avec headers pour réduire les blocages
-      axios.get(`https://games.roblox.com/v1/games/votes?universeIds=${universeId}`, { headers })
-        .catch(() => ({ data: { data: [] } })),
+    const [game, votes] = await Promise.all([
+      fetchGameData(universeId),
+      fetchVotes(universeId),
     ]);
 
-    const game  = gamesRes.data;
-    const votes = votesRes.data.data?.[0];
-
-    if (!game || !game.name) return null;
+    if (!game) {
+      console.error(`Erreur API Roblox (${universeId}): aucun jeu trouvé`);
+      return null;
+    }
 
     return {
       name:           game.name,
@@ -267,7 +299,7 @@ client.on('interactionCreate', async interaction => {
     const stats = await getRobloxGameStats(universeId);
     if (!stats) {
       return interaction.editReply({
-        content: '❌ Universe ID invalide ou jeu introuvable. Vérifie l\'ID de ton jeu Roblox.',
+        content: '❌ Universe ID invalide. Assure-toi d\'utiliser l\'**Universe ID** (pas le Place ID). Va sur create.roblox.com → ton jeu → URL → le numéro après /experiences/ = Universe ID. Si l\'ID est correct, l\'API Roblox est peut-être bloquée depuis cet hébergeur.',
       });
     }
 
