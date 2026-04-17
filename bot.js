@@ -130,9 +130,12 @@ async function fetchGameData(universeId) {
 }
 
 async function fetchVotes(universeId) {
+  // NOTE: games.roblox.com/v1/games/votes est instable / déprécié.
+  // On tente plusieurs proxies mais on renvoie null proprement si tout échoue.
   const urls = [
-    `https://games.roblox.com/v1/games/votes?universeIds=${universeId}`,
     `https://games.roproxy.com/v1/games/votes?universeIds=${universeId}`,
+    `https://games.rbxproxy.com/v1/games/votes?universeIds=${universeId}`,
+    `https://games.roblox.com/v1/games/votes?universeIds=${universeId}`,
   ];
   for (const url of urls) {
     try {
@@ -141,15 +144,20 @@ async function fetchVotes(universeId) {
       if (votes) return votes;
     } catch {}
   }
-  return null;
+  console.warn(`[API] Votes indisponibles pour ${universeId} (endpoint déprécié)`);
+  return null;  // On ne plante pas, on retourne null
 }
 
 async function getRobloxGameStats(universeId) {
   try {
-    const [game, votes] = await Promise.all([
+    // Promise.allSettled au lieu de Promise.all → les votes peuvent échouer sans tout casser
+    const [gameResult, votesResult] = await Promise.allSettled([
       fetchGameData(universeId),
       fetchVotes(universeId),
     ]);
+
+    const game  = gameResult.status  === 'fulfilled' ? gameResult.value  : null;
+    const votes = votesResult.status === 'fulfilled' ? votesResult.value : null;
 
     if (!game) {
       console.error(`Erreur API Roblox (${universeId}): aucun jeu trouvé (tous les proxies ont échoué)`);
@@ -163,6 +171,7 @@ async function getRobloxGameStats(universeId) {
       favoritedCount: game.favoritedCount,
       playing:        game.playing,
       playersOnline:  game.playing,
+      votesAvailable: !!votes,
       upVotes:        votes?.upVotes   || 0,
       downVotes:      votes?.downVotes || 0,
       maxPlayers:     game.maxPlayers,
@@ -202,9 +211,9 @@ function buildEmbed(stats) {
       { name: '👥  Joueurs en ligne',    value: `\`\`\`${formatNumber(stats.playing)}\`\`\``,           inline: true },
       { name: '🔭  Total visites',       value: `\`\`\`${formatNumber(stats.visits)}\`\`\``,            inline: true },
       { name: '⭐  Favoris',             value: `\`\`\`${formatNumber(stats.favoritedCount)}\`\`\``,    inline: true },
-      { name: '👍  Likes',               value: `\`\`\`${formatNumber(stats.upVotes)}\`\`\``,           inline: true },
-      { name: '👎  Dislikes',            value: `\`\`\`${formatNumber(stats.downVotes)}\`\`\``,         inline: true },
-      { name: '📊  Taux d\'approbation', value: `\`\`\`${likePercent(stats.upVotes, stats.downVotes)}\`\`\``, inline: true },
+      { name: '👍  Likes',               value: stats.votesAvailable ? `\`\`\`${formatNumber(stats.upVotes)}\`\`\`` : '`N/A`',  inline: true },
+      { name: '👎  Dislikes',            value: stats.votesAvailable ? `\`\`\`${formatNumber(stats.downVotes)}\`\`\`` : '`N/A`', inline: true },
+      { name: '📊  Taux d\'approbation', value: stats.votesAvailable ? `\`\`\`${likePercent(stats.upVotes, stats.downVotes)}\`\`\`` : '`N/A`', inline: true },
     )
     .setFooter({ text: `Mis à jour le ${now.toLocaleDateString('fr-FR')} à ${now.toLocaleTimeString('fr-FR')} • Roblox Stats Bot` })
     .setTimestamp();
