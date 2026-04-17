@@ -202,21 +202,28 @@ function likePercent(up, down) {
 // ─── Embed ─────────────────────────────────────────────────────────
 function buildEmbed(stats) {
   const now = new Date();
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setTitle(`🎮  ${stats.name}`)
     .setURL(`https://www.roblox.com/games/${stats.rootPlaceId}`)
     .setColor(0x00B06B)
-    .setDescription(stats.description ? `> ${stats.description}` : '')
     .addFields(
-      { name: '👥  Joueurs en ligne',    value: `\`\`\`${formatNumber(stats.playing)}\`\`\``,           inline: true },
-      { name: '🔭  Total visites',       value: `\`\`\`${formatNumber(stats.visits)}\`\`\``,            inline: true },
-      { name: '⭐  Favoris',             value: `\`\`\`${formatNumber(stats.favoritedCount)}\`\`\``,    inline: true },
-      { name: '👍  Likes',               value: stats.votesAvailable ? `\`\`\`${formatNumber(stats.upVotes)}\`\`\`` : '`N/A`',  inline: true },
-      { name: '👎  Dislikes',            value: stats.votesAvailable ? `\`\`\`${formatNumber(stats.downVotes)}\`\`\`` : '`N/A`', inline: true },
-      { name: '📊  Taux d\'approbation', value: stats.votesAvailable ? `\`\`\`${likePercent(stats.upVotes, stats.downVotes)}\`\`\`` : '`N/A`', inline: true },
+      { name: '👥  Joueurs en ligne', value: `**${formatNumber(stats.playing)}**`,       inline: true },
+      { name: '🔭  Total visites',    value: `**${formatNumber(stats.visits)}**`,         inline: true },
+      { name: '⭐  Favoris',          value: `**${formatNumber(stats.favoritedCount)}**`, inline: true },
+      { name: '👍  Likes',    value: stats.votesAvailable ? `**${formatNumber(stats.upVotes)}**`   : '`N/A`', inline: true },
+      { name: '👎  Dislikes', value: stats.votesAvailable ? `**${formatNumber(stats.downVotes)}**` : '`N/A`', inline: true },
+      { name: '📊  Approbation', value: stats.votesAvailable ? `**${likePercent(stats.upVotes, stats.downVotes)}**` : '`N/A`', inline: true },
     )
     .setFooter({ text: `Mis à jour le ${now.toLocaleDateString('fr-FR')} à ${now.toLocaleTimeString('fr-FR')} • Roblox Stats Bot` })
     .setTimestamp();
+
+  // IMPORTANT: setDescription('') fait planter l'API Discord (erreur 50035)
+  // On ne l'appelle que si la description est non-vide
+  if (stats.description && stats.description.trim().length > 0) {
+    embed.setDescription(`> ${stats.description}`);
+  }
+
+  return embed;
 }
 
 // ─── Mise à jour des stats d'un serveur ───────────────────────────
@@ -267,7 +274,9 @@ async function updateStatsForGuild(guildId) {
     console.log(`[${new Date().toLocaleTimeString()}] [${guildId}] Stats publiées`);
 
   } catch (err) {
-    console.error(`[${guildId}] Erreur updateStats:`, err.message);
+    // Log détaillé : on affiche le code d'erreur Discord + les erreurs par champ si disponibles
+    const discordErrors = err.rawError?.errors ? JSON.stringify(err.rawError.errors, null, 2) : '';
+    console.error(`[${guildId}] Erreur updateStats: ${err.message}${discordErrors ? '\nDétails: ' + discordErrors : ''}`);
   }
 }
 
