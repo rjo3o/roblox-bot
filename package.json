@@ -1,7 +1,7 @@
 {
   "name": "roblox-discord-stats-bot",
-  "version": "1.0.0",
-  "description": "Bot Discord affichant les stats Roblox en temps réel",
+  "version": "2.0.0",
+  "description": "Bot Discord public affichant les stats Roblox en temps réel pour chaque serveur",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
